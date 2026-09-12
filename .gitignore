@@ -1,0 +1,15 @@
+__pycache__/
+.ipynb_checkpoints/
+.packages/
+*.pyc
+*.joblib
+*.joblib.gz
+predictions.csv
+model_metadata.json
+cook_county_contest_data/
+cook_county_contest_test.csv
+*.zip
+artifacts/pipeline.joblib.gz
+artifacts/predictions.csv
+artifacts/split_*.npz
+artifacts/run.log

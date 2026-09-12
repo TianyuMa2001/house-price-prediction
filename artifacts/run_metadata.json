@@ -1,0 +1,30 @@
+{
+  "python": "3.12.14 (main, Aug 25 2026, 14:01:42) [MSC v.1944 64 bit (AMD64)]",
+  "platform": "Windows-11-10.0.26100-SP0",
+  "sklearn": "1.7.2",
+  "numpy": "2.5.3",
+  "pandas": "3.0.1",
+  "seeds": [
+    42,
+    43,
+    44
+  ],
+  "splits": [
+    "random",
+    "group",
+    "time"
+  ],
+  "training_rows": 138217,
+  "prediction_rows": 55311,
+  "seconds": 184.53085255622864,
+  "final_model": "histgb",
+  "final_includes_estimates": true,
+  "test_source": "https://raw.githubusercontent.com/DS-100/fa22/master/proj/proj1b/cook_county_contest_test.csv",
+  "test_source_limitation": "Public Berkeley dataset; identity with the local ECE grading set is unverified.",
+  "sha256": {
+    "D:\\2025MTY\\Projects\\Properties\\Project - part2\\cook_county_contest_data\\cook_county_contest_train.csv": "1389df82c4726393c2f64de628d08f1bd4366ecbc4bb50eed168ecdbd835c8f6",
+    "D:\\2025MTY\\Projects\\Properties\\Project - part2\\cook_county_contest_test.csv": "8589890a6e73b55c7c408195b20006840b94a40815f5f36c550d99ee15954706",
+    "D:\\2025MTY\\Projects\\Properties\\Project - part2\\evaluate.py": "b95f901e24a6f48935dc7a0dae573779a21a6386ddff882ea80b1140886ad30b",
+    "D:\\2025MTY\\Projects\\Properties\\Project - part2\\proj.py": "40fc9c4790ec79445eaaefa9e382b7f520c5c3504dd05fd5c59ba808e57dec51"
+  }
+}
