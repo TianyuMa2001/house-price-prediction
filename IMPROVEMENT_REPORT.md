@@ -1,88 +1,88 @@
-# 房价预测项目改进报告
+# Housing Price Prediction Improvement Report
 
-本次按照《KV与房价预测项目提升计划》完成验证可信度、基线、消融、质量检查、误差解释和可复现产物。旧随机验证结果得到精确复现，但新实验表明：模型在新房产上的表现较稳定，跨年份预测能力较弱。改进的主要价值是把这些边界量化，而非只追求更低的单次分数。
+This work implements the validation, baselines, ablation, data-quality checks, error analysis, and reproducibility requirements in the project improvement plan. The previous random-split result was reproduced precisely. New experiments show relatively stable performance on unseen properties but weaker performance across years. The main improvement is measuring these limitations rather than optimizing a single score.
 
-## 原状与本次改动
+## Previous State and Changes
 
-原有 `proj.py` 已能训练 HistGradientBoosting 并导出预测，但只有一次随机 80/20 划分，缺少防止同一房产同时出现于两侧的检查；代码没有输入契约、完整评估报告和自动测试。
+The original `proj.py` trained HistGradientBoosting and exported predictions, but used only one random 80/20 split. It did not check whether the same property appeared on both sides and lacked an input contract, a complete evaluation report, and automated tests.
 
-| 改进 | 实现 | 能解决的问题 |
+| Improvement | Implementation | Purpose |
 |---|---|---|
-| PIN 分组验证 | `evaluate.split_indices(..., 'group')` | 同一 PIN 的全部交易记录放在同一侧 |
-| 时间验证 | 2019 留出，并从 2013–2018 训练集剔除留出 PIN | 检验未来年份的新房产；不把同房产历史混入训练 |
-| 三档基线 | Median、Ridge、HistGB | 判断复杂模型相对简单方法的实际增益 |
-| 估值消融 | `include_estimates=False` | 同时排除原始和衍生估值特征，模型预测不需要估值列 |
-| 质量报告 | `data_quality.json`、`splits.json` | 缺失率、重复行、重复 PIN、无效价格、未知类别和重叠检查 |
-| 误差解释 | `grouped_errors.csv`、两个 importance CSV | 按价格带、房型编码和镇区编码定位误差 |
-| 工程化 | schema、CLI、日志、哈希、锁定版本、6 项测试 | 错误输入尽早失败，实验可追溯、模型可重新加载 |
+| PIN-grouped validation | `evaluate.split_indices(..., 'group')` | Keep all transactions for one property identifier (PIN) on the same side |
+| Temporal validation | Hold out 2019 and purge its PINs from the 2013–2018 training set | Evaluate future-year, unseen properties without including their historical transactions |
+| Three baselines | Median, Ridge, HistGB | Measure the value of complexity relative to simpler methods |
+| Assessor-estimate ablation | `include_estimates=False` | Exclude both raw and derived estimate features; prediction does not require estimate columns |
+| Quality reporting | `data_quality.json`, `splits.json` | Check missingness, duplicate rows/PINs, invalid prices, unseen categories, and overlap |
+| Error analysis | `grouped_errors.csv`, two importance CSVs | Diagnose errors by price band, property-class code, and town code |
+| Engineering | Schema, CLI, logs, hashes, pinned versions, six tests | Fail early on invalid inputs and support traceable experiments and model reloading |
 
-## 数据与切分证据
+## Data and Split Evidence
 
-训练集共 138,217 行、62 列、120,648 个不同 PIN；重复 PIN 行为 17,569，完整重复行 7。当前已过滤课程数据的各列缺失率均为 0，无价格低于 500 或非有限价格的样本；这不意味着真实部署数据也如此。为复现原始基线，保留重复记录；重复 PIN 本身可以是合法的多次交易。
+The training set contains 138,217 rows, 62 columns, and 120,648 distinct PINs, including 17,569 repeated-PIN rows and seven fully duplicated rows. Every column in this already-filtered course dataset has zero missingness, and there are no nonfinite prices or prices below $500. This does not imply deployment data will have the same quality. Duplicates were retained to reproduce the original baseline; repeated PINs may represent legitimate repeat transactions.
 
-| 切分 | 训练行 | 验证行 | 两侧 PIN 重叠 | 说明 |
+| Split | Training rows | Validation rows | PIN overlap | Notes |
 |---|---:|---:|---:|---|
-| 随机，seed 42 | 110,573 | 27,644 | 5,382 | 行索引无重叠，房产有重叠 |
-| PIN 分组，seed 42 | 110,596 | 27,621 | 0 | 按房产切分，所以行数不必恰为 20% |
-| 时间，2019 留出 | 113,898 | 20,199 | 0 | 剔除早期同 PIN 记录 4,120 行 |
+| Random, seed 42 | 110,573 | 27,644 | 5,382 | Row positions do not overlap, but properties do |
+| PIN-grouped, seed 42 | 110,596 | 27,621 | 0 | Property-level splitting need not produce exactly 20% of rows |
+| Temporal, 2019 holdout | 113,898 | 20,199 | 0 | Purges 4,120 earlier transactions sharing holdout PINs |
 
-随机与分组分别运行 seeds 42、43、44；时间边界固定，因此只跑一次，避免重复同一切分伪装成独立验证。每个切分都检查行位置无重叠；只有随机切分保留 PIN 重叠，作为原始方法的对照。每次划分的行位置与输入 SHA-256 均已保存。
+Random and grouped experiments use seeds 42, 43, and 44. The temporal boundary is fixed and is evaluated once rather than presenting repeated identical splits as independent validation. Every split checks disjoint row positions. Only the random split retains PIN overlap as a comparison with the original method. Split positions and input SHA-256 hashes were saved during the full local evaluation; large position-array files are excluded from this GitHub repository.
 
-## 三档模型与消融
+## Baselines and Ablation
 
-以下随机/分组为三次均值；时间为一次固定年份实验。RMSE、MAE 单位是美元。所有模型以自然对数价格为目标；Ridge 使用 one-hot 和数值标准化，HistGB 保留原有 ordinal 类别编码，原始特征范围一致。
+Random and grouped results below are means across three seeds; temporal results use one fixed-year experiment. RMSE and MAE are measured in US dollars. All models predict natural-log sale prices. Ridge uses one-hot encoding and numeric standardization; HistGB retains the original ordinal category encoding. The raw feature scope is consistent.
 
-| 验证 | 模型 | 估值 | RMSE | MAE | log-RMSE |
+| Validation | Model | Estimates | RMSE | MAE | log-RMSE |
 |---|---|---|---:|---:|---:|
-| 随机 | Median | 有/无 | 164,301 | 123,110 | 0.7866 |
-| 随机 | Ridge | 有 | 74,103 | 51,100 | 0.3611 |
-| 随机 | HistGB | 有 | 67,208 | 47,137 | 0.3469 |
-| 随机 | HistGB | 无 | 68,630 | 47,819 | 0.3485 |
-| PIN 分组 | Median | 有/无 | 163,923 | 122,518 | 0.7801 |
-| PIN 分组 | Ridge | 有 | 73,590 | 50,847 | 0.3577 |
-| PIN 分组 | Ridge | 无 | 73,625 | 50,912 | 0.3576 |
-| PIN 分组 | HistGB | 有 | 67,116 | 47,029 | 0.3438 |
-| PIN 分组 | HistGB | 无 | 68,366 | 47,698 | 0.3456 |
-| 时间 | Median | 有/无 | 167,151 | 122,900 | 0.7198 |
-| 时间 | Ridge | 有 | 80,313 | 58,779 | 0.3985 |
-| 时间 | Ridge | 无 | 81,016 | 59,576 | 0.4015 |
-| 时间 | HistGB | 有 | 90,923 | 70,862 | 0.4923 |
-| 时间 | HistGB | 无 | 101,220 | 78,109 | 0.5169 |
+| Random | Median | With/without | 164,301 | 123,110 | 0.7866 |
+| Random | Ridge | With | 74,103 | 51,100 | 0.3611 |
+| Random | HistGB | With | 67,208 | 47,137 | 0.3469 |
+| Random | HistGB | Without | 68,630 | 47,819 | 0.3485 |
+| PIN-grouped | Median | With/without | 163,923 | 122,518 | 0.7801 |
+| PIN-grouped | Ridge | With | 73,590 | 50,847 | 0.3577 |
+| PIN-grouped | Ridge | Without | 73,625 | 50,912 | 0.3576 |
+| PIN-grouped | HistGB | With | 67,116 | 47,029 | 0.3438 |
+| PIN-grouped | HistGB | Without | 68,366 | 47,698 | 0.3456 |
+| Temporal | Median | With/without | 167,151 | 122,900 | 0.7198 |
+| Temporal | Ridge | With | 80,313 | 58,779 | 0.3985 |
+| Temporal | Ridge | Without | 81,016 | 59,576 | 0.4015 |
+| Temporal | HistGB | With | 90,923 | 70,862 | 0.4923 |
+| Temporal | HistGB | Without | 101,220 | 78,109 | 0.5169 |
 
-完整 42 次结果见 `artifacts/metrics.csv`，含每次模型的运行耗时和样本数。旧 seed 42 的 HistGB log-RMSE=0.3461350280、RMSE=67,211.1439，复现了上一版结果。
+All 42 evaluations, including run times and sample counts, are in `artifacts/metrics.csv`. The original seed-42 HistGB result was reproduced: log-RMSE = 0.3461350280 and dollar RMSE = 67,211.1439.
 
-PIN 分组 HistGB 相对 Ridge 的平均 RMSE 低约 8.8%。分组三次 RMSE 的样本标准差约 947 美元。去掉估值后 RMSE 增加约 1,251 美元（1.86%）；这说明仍有其他有用信号，不能据此断言估值没有信息泄漏。
+Grouped HistGB has approximately 8.8% lower mean RMSE than Ridge. Its sample standard deviation across three grouped splits is approximately $947. Removing estimates increases RMSE by approximately $1,251 (1.86%). Other features therefore retain useful signal, but this does not establish that estimates are leakage-free.
 
-时间实验中 Ridge 优于 HistGB：年份类别在未来可能未出现，树模型难以外推，市场分布也可能变化。这些是合理解释，不是本次已证明的因果归因。继续保留 HistGB 为课程数据最终模型；若目标是未来年份部署，应重新选择模型并审计特征的时点可用性。
+Ridge outperforms HistGB in the temporal experiment. Unseen future-year categories, limited tree extrapolation, and market distribution changes are plausible explanations, not established causal findings. HistGB remains the final course-dataset model. Future-year deployment would require model reselection and an audit of feature availability at prediction time.
 
-![模型比较](artifacts/model_comparison.png)
+![Model comparison](artifacts/model_comparison.png)
 
-## 哪些样本更难
+## Harder Samples
 
-PIN 分组 seed 42、有估值 HistGB 的价格带结果如下。价格带由真实标签决定，仅用于事后诊断，没有回流为训练特征。
+The following price-band results use grouped seed 42 and HistGB with estimates. Bands are determined by true labels for post-hoc diagnosis only; they are not fed back into training.
 
-| 真实价格 | 样本数 | MAE | RMSE | log-RMSE |
+| Actual price | Samples | MAE | RMSE | log-RMSE |
 |---|---:|---:|---:|---:|
 | <100k | 5,133 | 28,511 | 42,558 | 0.5213 |
 | 100k–250k | 11,793 | 39,258 | 52,081 | 0.3258 |
 | 250k–500k | 8,375 | 55,997 | 74,510 | 0.2444 |
 | 500k–1m | 2,320 | 102,573 | 132,490 | 0.2693 |
 
-高价房的美元误差更大；低价房的相对误差更大。此验证集没有超过 1m 的样本，因此不能宣传豪宅泛化能力。镇区编码 73（185 行）和 10（168 行）RMSE 约为 118,352、113,808；房型编码 206（719 行）为 110,204。编码仅作为原始分组标签，没有自行猜测真实区域名称。小组样本量及房价分布不同，不能把这些指标当作公平性结论。
+Higher-priced properties have larger dollar errors; lower-priced properties have larger relative errors. This validation set contains no properties above $1 million, so it does not support claims about luxury-property generalization. Town codes 73 (185 rows) and 10 (168 rows) have RMSE of approximately $118,352 and $113,808; property-class code 206 (719 rows) has RMSE of approximately $110,204. Codes are retained as source labels rather than assigning unverified geographic names. Different sample sizes and price distributions prevent treating these metrics as fairness conclusions.
 
-Permutation importance 在分组验证集抽取 1,500 行、重复打乱 3 次，以 log-RMSE 增量衡量。前列包括建筑估值、纬度、土地估值、Most Recent Sale、经度和年份。单列打乱反映已拟合模型的依赖；相关特征可互相替代，因此不能与重新训练的消融增益直接等同，也不是因果解释。
+Permutation importance samples 1,500 grouped-validation rows and repeats each shuffle three times, measuring the increase in log-RMSE. Leading features include building estimates, latitude, land estimates, `Most Recent Sale`, longitude, and sale year. A single-column shuffle measures fitted-model dependence. Correlated features can substitute for one another, so this is neither equivalent to retraining-based ablation nor a causal explanation.
 
-## 重要边界与上一版修正
+## Limitations and Corrections
 
-1. 官方估值是否在预测时已知，需要独立的 as-of 审计。本地字典说明来自上一税年，不能据此保证每条记录没有未来信息。
-2. `Most Recent Sale` 是回溯性标志，可能使用未来交易信息，而且在 importance 中靠前。当前课程模型不能直接作为交易发生前的在线模型。无估值消融没有同时移除此标志，应准确描述实验范围。
-3. 随机/分组验证分数接近，不代表重复房产永远无害；本次三次切分只是稳定性证据，不是独立置信区间。
-4. 55,311 行预测对应下载自 Berkeley DS-100/fa22 的公开测试数据。尚未确认该数据等同于本地 ECE 课程的正式评分数据。上一版把“成功生成预测”表述为“正式竞赛数据已核验”证据不足，在此更正。训练与该测试集有 12,325 个 PIN 重叠，且测试标签缺失，不能计算真实官方测试分数或排名。
-5. 7 条完整重复记录未删除，以保持与旧基线同口径；未来另做去重敏感性分析时应单独标记实验版本。
+1. Assessor values need an independent as-of availability audit. A local dictionary describes prior-tax-year values, but that alone cannot guarantee every row is free of future information.
+2. `Most Recent Sale` is retrospective, may depend on future transactions, and ranks highly in importance. The course model is not directly suitable for online prediction before a sale. The no-estimates ablation does not remove this flag.
+3. Similar random and grouped scores do not imply repeated properties are always harmless. Three fixed splits provide stability evidence, not independent confidence intervals.
+4. The 55,311 predictions use the public Berkeley DS-100/fa22 test dataset. Its identity with the local ECE course's official grading data remains unverified. Previously equating successful prediction export with verified official contest data was unsupported. Training and test share 12,325 PINs; test labels are absent, so no official test score or rank can be calculated.
+5. Seven fully duplicated rows were retained for comparability. A future deduplication sensitivity analysis should be labeled as a separate experiment version.
 
-## 运行与产物
+## Reproduction and Outputs
 
-在 Part 2 目录，以 Python 3.12 执行：
+Use Python 3.12:
 
 ```powershell
 pip install -r requirements.txt
@@ -90,8 +90,10 @@ python -m unittest -v test_pipeline
 python evaluate.py --seeds 42 43 44 --output artifacts
 ```
 
-最终模型默认用全量有效训练行拟合，输出 `artifacts/pipeline.joblib.gz` 和 `artifacts/predictions.csv`。预测仍为 log(Sale Price)，保留课程原格式的索引列。`--without-estimates` 控制最终模型不依赖估值；`--train`、`--test` 可指向重新确认的数据文件。旧 `train_part2.py` 保留简单训练入口。
+Supply the course CSVs at the paths described in the README, or use `--train` and `--test` to specify verified files. The final model fits all valid training rows and writes `artifacts/pipeline.joblib.gz` and `artifacts/predictions.csv`. Predictions remain log(Sale Price), with the course-format index column. `--without-estimates` makes the final model independent of estimate columns. `train_part2.py` remains a simpler training entry point.
 
-6 项自动测试覆盖 PIN 隔离、时间隔离、schema 拒绝缺列/非有限值、特征处理不修改输入及小数浴室数、未知类别/缺失值/无估值与序列化，以及无效目标和指标。测试全部通过；导出前检查预测长度和有限值，并验证重新加载模型的结果一致。
+Six automated tests cover PIN isolation, temporal purging, missing-column/nonfinite-value rejection, nonmutating feature engineering and fractional bathroom counts, unseen categories/missing values/no-estimates/serialization, and invalid targets and metrics. All tests pass. The GitHub test suite uses synthetic fixtures and does not require course data. Full local export checks validated prediction length, finite values, and identical predictions after reloading.
 
-面试讲解可依次说明：为什么预测 log(price)、为什么不能只随机划分、为什么需要 Median 和 Ridge、估值消融说明什么、为什么未来年份结果更差、哪些信息不能在线获得。按计划已到达停止线，本次未添加 Web 前端、云部署或没有验证依据的简历数字。
+This repository publishes code and compact reviewed evidence. Dataset archives, fitted models, predictions, split arrays, and large logs are local reproducible outputs and are not uploaded.
+
+An interview explanation can focus on the log-price target, grouped rather than random-only validation, Median and Ridge baselines, what ablation establishes, weaker future-year performance, and features unavailable online. The planned scope is complete; no web frontend, cloud deployment, or unsupported resume metrics were added.
